@@ -15,7 +15,8 @@ import {
   OffersIcon,
   ListingsIcon,
   HelpIcon,
-  WarningIcon
+  WarningIcon,
+  Modal
 } from '@tackle-io/design-system';
 import {
   LISTINGS_BY_ACCOUNT,
@@ -201,6 +202,24 @@ const PARTNER_HIDDEN_FIELDS = new Set([
   'new_service_end_date'
 ]);
 
+// Mock Salesforce product codes mapping to Tackle composite targets [Listing] > [SKU]
+const DEFAULT_SKU_ROWS = [
+  { sfdcCode: 'PROD-PREM-API', defaultTarget: 'Hooli Premium > api_overage', defaultRate: '$0.50' },
+  { sfdcCode: 'PROD-BASIC-API', defaultTarget: 'Hooli Basic > api_overage', defaultRate: '$0.10' },
+  { sfdcCode: 'PROD-PREM-ADD', defaultTarget: 'Hooli Premium > add_charge', defaultRate: '$0.01' },
+  { sfdcCode: 'PROD-ENT-ADD', defaultTarget: 'Hooli Enterprise > add_charge', defaultRate: '$0.00' }
+];
+
+const TACKLE_COMPOSITE_TARGETS = [
+  'Hooli Premium > api_overage',
+  'Hooli Premium > add_charge',
+  'Hooli Basic > api_overage',
+  'Hooli Standard API > api_overage',
+  'Hooli Standard API > add_charge',
+  'Hooli Enterprise > add_charge',
+  'Hooli Enterprise > data_egress'
+];
+
 const TACKLE_OBJECT_TABS = [
   { id: 'cosell', label: 'Co-Sell', icon: <CoSellIcon size="small" /> },
   { id: 'offers', label: 'Offers', icon: <OffersIcon size="small" /> }
@@ -263,6 +282,20 @@ export function HomePageV3() {
   const [copyOpen, setCopyOpen] = useState(false);
   const [hoveredCommon, setHoveredCommon] = useState<string | null>(null);
   const [saveAlert, setSaveAlert] = useState<string | null>(null);
+
+  const [skuMapOpen, setSkuMapOpen] = useState(false);
+  const [skuMappings, setSkuMappings] = useState<Record<string, string>>({
+    'PROD-PREM-API': 'Hooli Premium > api_overage',
+    'PROD-BASIC-API': 'Hooli Basic > api_overage',
+    'PROD-PREM-ADD': 'Hooli Premium > add_charge',
+    'PROD-ENT-ADD': 'Hooli Enterprise > add_charge'
+  });
+  const [skuDefaults, setSkuDefaults] = useState<Record<string, string>>({
+    'PROD-PREM-API': '$0.50',
+    'PROD-BASIC-API': '$0.10',
+    'PROD-PREM-ADD': '$0.01',
+    'PROD-ENT-ADD': '$0.00'
+  });
 
   const isPartner = tab === 'partner';
   const mappings = isPartner ? partnerMappings : directMappings;
@@ -521,11 +554,34 @@ export function HomePageV3() {
         )}
         {parentObjectRow('usage_pricing_obj', 'Salesforce object for usage pricing', SF_LINE_ITEM_OBJECT_OPTIONS)}
         <Row label="Sku" align="flex-start">
-          {childMapCombo(
-            'usage_match_key',
-            'usage_pricing_obj',
-            "Match this to the dimension's SKU name so each line item's fee maps correctly."
-          )}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', width: '100%' }}>
+            {childMapCombo(
+              'usage_match_key',
+              'usage_pricing_obj',
+              "Match this to the dimension's SKU name so each line item's fee maps correctly."
+            )}
+            <div>
+              <button
+                type="button"
+                onClick={() => setSkuMapOpen(true)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  padding: 0,
+                  color: '#1fadad',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  fontSize: '12px',
+                  marginTop: '4px',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '4px'
+                }}
+              >
+                Map SKU values ({Object.keys(skuMappings).length} mapped)
+              </button>
+            </div>
+          </div>
         </Row>
         {structRow('usage_fee', 'Fee amount', 'Number', 'none', 'Enter a value', 'usage_pricing_obj')}
       </Section>
@@ -846,6 +902,189 @@ export function HomePageV3() {
     </>
   );
 
+  const skuMapModal = skuMapOpen && (
+    <Modal
+      isOpen={skuMapOpen}
+      onClose={() => setSkuMapOpen(false)}
+      title="Map picklist values"
+      description="Map Salesforce Product Codes to composite AWS SKU targets"
+      size="large"
+      primaryAction={{
+        label: 'Apply',
+        onClick: () => {
+          setSkuMapOpen(false);
+          setSaveAlert('SKU value mappings and fallback rates applied successfully!');
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+          setTimeout(() => setSaveAlert(null), 5000);
+        }
+      }}
+      secondaryAction={{
+        label: 'Cancel',
+        onClick: () => setSkuMapOpen(false)
+      }}
+    >
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', padding: '12px 0' }}>
+        {/* Field Header Block */}
+        <div style={{ display: 'flex', gap: '24px' }}>
+          <div style={{ flex: 1 }}>
+            <label
+              style={{
+                display: 'block',
+                fontSize: '12px',
+                fontWeight: 600,
+                color: 'var(--color-neutral-70)',
+                marginBottom: '6px',
+                fontFamily: 'var(--font-family-primary)'
+              }}
+            >
+              Salesforce field
+            </label>
+            <div
+              style={{
+                padding: '8px 12px',
+                backgroundColor: 'var(--color-neutral-10)',
+                border: '1px solid var(--color-neutral-30)',
+                borderRadius: 'var(--border-radius-base)',
+                fontSize: '14px',
+                color: 'var(--color-neutral-80)',
+                fontFamily: 'var(--font-family-primary)',
+                fontWeight: 600
+              }}
+            >
+              Product Code
+            </div>
+          </div>
+          <div style={{ flex: 1 }}>
+            <label
+              style={{
+                display: 'block',
+                fontSize: '12px',
+                fontWeight: 600,
+                color: 'var(--color-neutral-70)',
+                marginBottom: '6px',
+                fontFamily: 'var(--font-family-primary)'
+              }}
+            >
+              AWS Marketplace field
+            </label>
+            <div
+              style={{
+                padding: '8px 12px',
+                backgroundColor: 'var(--color-neutral-10)',
+                border: '1px solid var(--color-neutral-30)',
+                borderRadius: 'var(--border-radius-base)',
+                fontSize: '14px',
+                color: 'var(--color-neutral-80)',
+                fontFamily: 'var(--font-family-primary)',
+                fontWeight: 600
+              }}
+            >
+              Usage Dimension
+            </div>
+          </div>
+        </div>
+
+        {/* Section Header Shaded Bar */}
+        <div
+          style={{
+            display: 'flex',
+            backgroundColor: 'var(--color-neutral-10)',
+            borderTop: '1px solid var(--color-neutral-30)',
+            borderBottom: '1px solid var(--color-neutral-30)',
+            padding: '10px 16px',
+            margin: '0 -24px'
+          }}
+        >
+          <div
+            style={{
+              width: '35%',
+              fontSize: '13px',
+              fontWeight: 700,
+              color: 'var(--color-neutral-90)',
+              fontFamily: 'var(--font-family-primary)'
+            }}
+          >
+            Salesforce values
+          </div>
+          <div
+            style={{
+              width: '45%',
+              fontSize: '13px',
+              fontWeight: 700,
+              color: 'var(--color-neutral-90)',
+              fontFamily: 'var(--font-family-primary)'
+            }}
+          >
+            AWS Marketplace values (Listing &gt; SKU)
+          </div>
+          <div
+            style={{
+              width: '20%',
+              fontSize: '13px',
+              fontWeight: 700,
+              color: 'var(--color-neutral-90)',
+              fontFamily: 'var(--font-family-primary)'
+            }}
+          >
+            Static Default Rate
+          </div>
+        </div>
+
+        {/* Mapping Rows */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+          {DEFAULT_SKU_ROWS.map((row) => {
+            const currentVal = skuMappings[row.sfdcCode] || '';
+            const currentRate = skuDefaults[row.sfdcCode] || '';
+            return (
+              <div
+                key={row.sfdcCode}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  padding: '4px 0'
+                }}
+              >
+                {/* Left side: Salesforce Value */}
+                <div
+                  style={{
+                    width: '35%',
+                    fontSize: '13px',
+                    color: 'var(--color-neutral-90)',
+                    fontFamily: 'var(--font-family-primary)',
+                    fontWeight: 500,
+                    paddingRight: '12px'
+                  }}
+                >
+                  {row.sfdcCode}
+                </div>
+
+                {/* Middle side: Tackle Target */}
+                <div style={{ width: '45%', paddingRight: '16px' }}>
+                  <ComboBox
+                    options={TACKLE_COMPOSITE_TARGETS.map((t) => ({ value: t, label: t }))}
+                    value={currentVal}
+                    onChange={(val) => setSkuMappings({ ...skuMappings, [row.sfdcCode]: val })}
+                    placeholder="Choose a composite SKU target"
+                    className="w-full"
+                  />
+                </div>
+
+                {/* Right side: Static default rate */}
+                <div style={{ width: '20%' }}>
+                  <TextField
+                    value={currentRate}
+                    onChange={(e) => setSkuDefaults({ ...skuDefaults, [row.sfdcCode]: e.target.value })}
+                    placeholder="e.g. $0.00"
+                  />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </Modal>
+  );
+
   /* ------------------------------ Render ------------------------------- */
 
   if (activeSettingsTab !== 'field-mapper') {
@@ -1090,6 +1329,7 @@ export function HomePageV3() {
       </div>
 
       {copyDrawer}
+      {skuMapModal}
     </div>
   );
 }
