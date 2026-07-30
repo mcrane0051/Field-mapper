@@ -15,8 +15,7 @@ import {
   OffersIcon,
   ListingsIcon,
   HelpIcon,
-  WarningIcon,
-  Modal
+  WarningIcon
 } from '@tackle-io/design-system';
 import {
   LISTINGS_BY_ACCOUNT,
@@ -62,6 +61,7 @@ const CHILD_FIELDS_BY_OBJECT: Record<string, string[]> = {
   OpportunityContactRoles: ['Full Name', 'Email', 'Title', 'Role', 'Phone', 'Company'],
   QuoteLineItems: [
     'Product Name',
+    'Product Code',
     'SKU',
     'Description',
     'Quantity',
@@ -114,7 +114,7 @@ const COPYABLE_OFFER_FIELDS: Array<{ key: string; label: string }> = [
   { key: 'usage_end_date', label: 'Usage end date' },
   { key: 'new_service_end_date', label: 'New service end date' },
   { key: 'usage_pricing_obj', label: 'Salesforce object for usage pricing' },
-  { key: 'usage_match_key', label: 'Sku' },
+  { key: 'usage_match_key', label: 'Usage dimension' },
   { key: 'usage_fee', label: 'Fee amount' },
   { key: 'eula_version', label: 'EULA version' },
   { key: 'marketplace_fee', label: 'Marketplace fee' },
@@ -151,7 +151,7 @@ const INITIAL_DIRECT_MAPPINGS: Record<string, string> = {
   usage_end_date: SF.endDate,
   new_service_end_date: SF.endDate,
   usage_pricing_obj: SF.quoteLineItems,
-  usage_match_key: 'QuoteLineItems > SKU',
+  // Left unmapped by default so the guided "select field -> modal opens" flow is demoable.
   usage_fee: 'QuoteLineItems > Fee Amount',
   eula_version: SF.expiration,
   marketplace_fee: SF.startDate,
@@ -210,14 +210,30 @@ const DEFAULT_SKU_ROWS = [
   { sfdcCode: 'PROD-ENT-ADD', defaultTarget: 'Hooli Enterprise > add_charge', defaultRate: '$0.00' }
 ];
 
-const TACKLE_COMPOSITE_TARGETS = [
-  'Hooli Premium > api_overage',
-  'Hooli Premium > add_charge',
-  'Hooli Basic > api_overage',
-  'Hooli Standard API > api_overage',
-  'Hooli Standard API > add_charge',
-  'Hooli Enterprise > add_charge',
-  'Hooli Enterprise > data_egress'
+// Formats a stored "Listing > SKU" value as "SKU (Listing)" for display in both
+// the mapping dropdown/chips and the default-pricing table, so nothing is ambiguous.
+const skuTargetLabel = (value: string) => {
+  const [listing, sku] = value.split(' > ');
+  return sku ? `${sku} (${listing})` : value;
+};
+
+// Each option is a Listing+SKU pair. The value keeps the "Listing > SKU" shape
+// (used by fee-pricing + mappedSkus), and the LABEL carries both the SKU and the
+// listing so a selected chip is never ambiguous. Sorted alphabetically by SKU
+// name first, then by listing name.
+const SKU_GROUPED_OPTIONS = [
+  { value: 'Hooli Enterprise > Add_charge', label: skuTargetLabel('Hooli Enterprise > Add_charge'), disabled: false },
+  { value: 'Hooli Premium > Add_charge', label: skuTargetLabel('Hooli Premium > Add_charge'), disabled: false },
+
+  { value: 'Hooli Enterprise > Add_units', label: skuTargetLabel('Hooli Enterprise > Add_units'), disabled: false },
+  { value: 'Hooli Premium > Add_units', label: skuTargetLabel('Hooli Premium > Add_units'), disabled: false },
+  { value: 'Hooli Standard API > Add_units', label: skuTargetLabel('Hooli Standard API > Add_units'), disabled: false },
+
+  { value: 'Hooli Enterprise > Add_users', label: skuTargetLabel('Hooli Enterprise > Add_users'), disabled: false },
+
+  { value: 'Hooli Basic > Overage', label: skuTargetLabel('Hooli Basic > Overage'), disabled: false },
+  { value: 'Hooli Enterprise > Overage', label: skuTargetLabel('Hooli Enterprise > Overage'), disabled: false },
+  { value: 'Hooli Premium > Overage', label: skuTargetLabel('Hooli Premium > Overage'), disabled: false }
 ];
 
 const TACKLE_OBJECT_TABS = [
@@ -284,24 +300,44 @@ export function HomePageV3() {
   const [saveAlert, setSaveAlert] = useState<string | null>(null);
 
   const [skuMapOpen, setSkuMapOpen] = useState(false);
-  const [skuMappings, setSkuMappings] = useState<Record<string, string>>({
-    'PROD-PREM-API': 'Hooli Premium > api_overage',
-    'PROD-BASIC-API': 'Hooli Basic > api_overage',
-    'PROD-PREM-ADD': 'Hooli Premium > add_charge',
-    'PROD-ENT-ADD': 'Hooli Enterprise > add_charge'
-  });
-  const [skuDefaults, setSkuDefaults] = useState<Record<string, string>>({
-    'PROD-PREM-API': '$0.50',
-    'PROD-BASIC-API': '$0.10',
-    'PROD-PREM-ADD': '$0.01',
-    'PROD-ENT-ADD': '$0.00'
-  });
+  // Each Salesforce Product Code can map to MULTIPLE AWS SKUs (same dimension may
+  // exist on several listings), so targets are stored as an array per code.
+  const [skuMappings, setSkuMappings] = useState<Record<string, string[]>>({});
+  const [feePricingOpen, setFeePricingOpen] = useState(false);
+  // Default pricing is keyed by the mapped AWS SKU (e.g. "Hooli Premium > Overage").
+  const [feeDefaults, setFeeDefaults] = useState<Record<string, string>>({});
+
+  // Unique AWS SKUs that have actually been mapped in the "Map SKU values" modal.
+  const mappedSkus = Array.from(
+    new Set(
+      Object.values(skuMappings)
+        .flat()
+        .filter(Boolean)
+    )
+  );
+
+  const mappedSkuCodes = DEFAULT_SKU_ROWS.filter(
+    (r) => (skuMappings[r.sfdcCode] || []).length > 0
+  ).length;
 
   const isPartner = tab === 'partner';
   const mappings = isPartner ? partnerMappings : directMappings;
   const setMappings = isPartner ? setPartnerMappings : setDirectMappings;
   const defaults = isPartner ? partnerDefaults : directDefaults;
   const setDefaults = isPartner ? setPartnerDefaults : setDirectDefaults;
+
+  // The Salesforce field the value-mapping modal reads from. The mock value rows
+  // only make sense for Product Code; any other field would surface that field's
+  // own distinct values (which the prototype doesn't have), so we show a hint.
+  const usageSourceField = mappings['usage_match_key'] || '';
+  const usageSourceLeaf = usageSourceField.split(' > ').pop() || '';
+  const usageSourceIsProductCode = usageSourceField === 'QuoteLineItems > Product Code';
+
+  // Number of Salesforce values available to map, based on the selected source
+  // field. Only Product Code has mock values in the prototype; other fields would
+  // pull their own distinct values (0 here). Drives the "(x/y mapped)" cue.
+  const totalSkuValues = usageSourceIsProductCode ? DEFAULT_SKU_ROWS.length : 0;
+  const mappedSkuValues = usageSourceIsProductCode ? mappedSkuCodes : 0;
 
   /* --------------------------- Offer-row helpers ----------------------- */
 
@@ -316,13 +352,22 @@ export function HomePageV3() {
   );
 
   // Child field of a parent object mapping: options are scoped to the selected object.
-  const childMapCombo = (key: string, parentKey: string, helperText?: string) => {
+  const childMapCombo = (
+    key: string,
+    parentKey: string,
+    helperText?: string,
+    onChanged?: (prev: string, next: string) => void
+  ) => {
     const parentVal = mappings[parentKey] || '';
     return (
       <ComboBox
         options={childOptionsFor(parentVal)}
         value={mappings[key] || ''}
-        onChange={(val) => setMappings({ ...mappings, [key]: val })}
+        onChange={(val) => {
+          const prev = mappings[key] || '';
+          setMappings({ ...mappings, [key]: val });
+          if (prev !== val && onChanged) onChanged(prev, val);
+        }}
         placeholder={parentVal ? 'Choose a field' : 'Select the object above first'}
         disabled={!parentVal}
         helperText={helperText}
@@ -550,27 +595,41 @@ export function HomePageV3() {
 
         {subHeader(
           'Usage dimensions',
-          'Each listing defines its own usage dimensions. Map where usage pricing lives in Salesforce once — Tackle matches each line item to the right dimension by its SKU name, so this scales to any number of dimensions.'
+          'Each listing defines its own usage dimensions. Map where usage pricing lives in Salesforce once — Tackle matches each line item to the right dimension by its name, so this scales to any number of dimensions.'
         )}
         {parentObjectRow('usage_pricing_obj', 'Salesforce object for usage pricing', SF_LINE_ITEM_OBJECT_OPTIONS)}
-        <Row label="Sku" align="flex-start">
+        <Row label="Usage dimension" align="flex-start">
           <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', width: '100%' }}>
             {childMapCombo(
               'usage_match_key',
               'usage_pricing_obj',
-              "Match this to the dimension's SKU name so each line item's fee maps correctly."
+              "Select the Salesforce field that identifies each line item's usage dimension. You'll match its values to your dimensions below.",
+              (prev, next) => {
+                // Changing the source field invalidates the value mappings + pricing
+                // that were derived from the OLD field's values, so reset them.
+                const hadMappings = Object.values(skuMappings).some((a) => a && a.length);
+                setSkuMappings({});
+                setFeeDefaults({});
+                // Guided hand-off: open to (re)map values against the new field —
+                // on first selection, or when a change wiped out existing mappings.
+                // Slight delay so the selection registers visually before the modal.
+                if (next && (!prev || hadMappings)) {
+                  setTimeout(() => setSkuMapOpen(true), 150);
+                }
+              }
             )}
             <div>
               <button
                 type="button"
+                disabled={!usageSourceField}
                 onClick={() => setSkuMapOpen(true)}
                 style={{
                   background: 'none',
                   border: 'none',
                   padding: 0,
-                  color: '#1fadad',
+                  color: usageSourceField ? '#1fadad' : 'var(--color-neutral-50)',
                   fontWeight: 600,
-                  cursor: 'pointer',
+                  cursor: usageSourceField ? 'pointer' : 'not-allowed',
                   fontSize: '12px',
                   marginTop: '4px',
                   display: 'inline-flex',
@@ -578,12 +637,44 @@ export function HomePageV3() {
                   gap: '4px'
                 }}
               >
-                Map SKU values ({Object.keys(skuMappings).length} mapped)
+                Map dimension values
+                {usageSourceField ? ` (${mappedSkuValues}/${totalSkuValues} mapped)` : ''}
               </button>
             </div>
           </div>
         </Row>
-        {structRow('usage_fee', 'Fee amount', 'Number', 'none', 'Enter a value', 'usage_pricing_obj')}
+        <Row label="Fee amount" type="Number" align="flex-start">
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', width: '100%' }}>
+            {childMapCombo('usage_fee', 'usage_pricing_obj')}
+            <div>
+              <button
+                type="button"
+                disabled={mappedSkus.length === 0}
+                onClick={() => setFeePricingOpen(true)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  padding: 0,
+                  color: mappedSkus.length === 0 ? 'var(--color-neutral-50)' : '#1fadad',
+                  fontWeight: 600,
+                  cursor: mappedSkus.length === 0 ? 'not-allowed' : 'pointer',
+                  fontSize: '12px',
+                  marginTop: '4px',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '4px'
+                }}
+                title={
+                  mappedSkus.length === 0
+                    ? 'Map dimension values first to set default pricing'
+                    : undefined
+                }
+              >
+                Set default pricing
+              </button>
+            </div>
+          </div>
+        </Row>
       </Section>
 
       <Section title="End user license agreement fields">
@@ -902,28 +993,71 @@ export function HomePageV3() {
     </>
   );
 
+  const applySkuMap = () => {
+    setSkuMapOpen(false);
+    setSaveAlert('Dimension value mappings applied successfully!');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    setTimeout(() => setSaveAlert(null), 5000);
+  };
+
+  const applyFeePricing = () => {
+    setFeePricingOpen(false);
+    setSaveAlert('Default pricing applied successfully!');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    setTimeout(() => setSaveAlert(null), 5000);
+  };
+
   const skuMapModal = skuMapOpen && (
-    <Modal
-      isOpen={skuMapOpen}
-      onClose={() => setSkuMapOpen(false)}
-      title="Map picklist values"
-      description="Map Salesforce Product Codes to composite AWS SKU targets"
-      size="large"
-      primaryAction={{
-        label: 'Apply',
-        onClick: () => {
-          setSkuMapOpen(false);
-          setSaveAlert('SKU value mappings and fallback rates applied successfully!');
-          window.scrollTo({ top: 0, behavior: 'smooth' });
-          setTimeout(() => setSaveAlert(null), 5000);
-        }
-      }}
-      secondaryAction={{
-        label: 'Cancel',
-        onClick: () => setSkuMapOpen(false)
-      }}
-    >
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', padding: '12px 0' }}>
+    <>
+      <div
+        onClick={() => setSkuMapOpen(false)}
+        style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,43,65,0.4)', zIndex: 100 }}
+      />
+      <div
+        role="dialog"
+        aria-label="Map picklist values"
+        style={{
+          position: 'fixed',
+          top: '50%',
+          left: '50%',
+          transform: 'translate(-50%, -50%)',
+          width: 'min(720px, 94vw)',
+          maxHeight: '90vh',
+          overflowY: 'auto',
+          zIndex: 101,
+          backgroundColor: 'var(--color-neutral-0)',
+          borderRadius: 'var(--border-radius-base)',
+          boxShadow: 'var(--elevation-400)',
+          display: 'flex',
+          flexDirection: 'column'
+        }}
+      >
+        {/* Header */}
+        <div style={{ padding: '20px 24px 0 24px' }}>
+          <h2
+            style={{
+              margin: '0 0 4px 0',
+              fontSize: '18px',
+              fontWeight: 700,
+              color: 'var(--color-neutral-100)',
+              fontFamily: 'var(--font-family-primary)'
+            }}
+          >
+            Map picklist values
+          </h2>
+          <p
+            style={{
+              margin: 0,
+              fontSize: '13px',
+              color: 'var(--color-neutral-70)',
+              fontFamily: 'var(--font-family-primary)'
+            }}
+          >
+            From Salesforce to AWS Marketplace
+          </p>
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', padding: '16px 24px' }}>
         {/* Field Header Block */}
         <div style={{ display: 'flex', gap: '24px' }}>
           <div style={{ flex: 1 }}>
@@ -951,7 +1085,7 @@ export function HomePageV3() {
                 fontWeight: 600
               }}
             >
-              Product Code
+              {usageSourceLeaf || 'Not selected'}
             </div>
           </div>
           <div style={{ flex: 1 }}>
@@ -979,10 +1113,22 @@ export function HomePageV3() {
                 fontWeight: 600
               }}
             >
-              Usage Dimension
+              Usage dimension
             </div>
           </div>
         </div>
+
+        <Banner
+          className="field-mapper-banner"
+          variant="info"
+          borderPosition="top"
+          expandable
+          defaultExpanded
+          title="Map each Salesforce value to its usage dimension"
+        >
+          Pick the AWS Marketplace usage dimension each Salesforce value represents. One value can map to the
+          same dimension on more than one listing.
+        </Banner>
 
         {/* Section Header Shaded Bar */}
         <div
@@ -997,7 +1143,7 @@ export function HomePageV3() {
         >
           <div
             style={{
-              width: '35%',
+              width: '40%',
               fontSize: '13px',
               fontWeight: 700,
               color: 'var(--color-neutral-90)',
@@ -1008,46 +1154,234 @@ export function HomePageV3() {
           </div>
           <div
             style={{
-              width: '45%',
+              width: '60%',
               fontSize: '13px',
               fontWeight: 700,
               color: 'var(--color-neutral-90)',
               fontFamily: 'var(--font-family-primary)'
             }}
           >
-            AWS Marketplace values (Listing &gt; SKU)
-          </div>
-          <div
-            style={{
-              width: '20%',
-              fontSize: '13px',
-              fontWeight: 700,
-              color: 'var(--color-neutral-90)',
-              fontFamily: 'var(--font-family-primary)'
-            }}
-          >
-            Static Default Rate
+            AWS Marketplace values
           </div>
         </div>
 
+        {/* When the source field isn't Product Code, we don't have that field's
+            distinct values in the prototype — surface the real behavior instead. */}
+        {!usageSourceIsProductCode && (
+          <div
+            style={{
+              padding: '16px',
+              fontSize: '13px',
+              color: 'var(--color-neutral-70)',
+              fontFamily: 'var(--font-family-primary)',
+              backgroundColor: 'var(--color-neutral-10)',
+              border: '1px dashed var(--color-neutral-30)',
+              borderRadius: 'var(--border-radius-base)'
+            }}
+          >
+            {usageSourceLeaf
+              ? `The distinct values of “${usageSourceLeaf}” will appear here for you to map.`
+              : 'Select a Salesforce field for Usage dimension first — its values will appear here for you to map.'}
+          </div>
+        )}
+
         {/* Mapping Rows */}
+        {usageSourceIsProductCode && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
           {DEFAULT_SKU_ROWS.map((row) => {
-            const currentVal = skuMappings[row.sfdcCode] || '';
-            const currentRate = skuDefaults[row.sfdcCode] || '';
+            const currentVals = skuMappings[row.sfdcCode] || [];
             return (
               <div
                 key={row.sfdcCode}
                 style={{
                   display: 'flex',
-                  alignItems: 'center',
+                  alignItems: 'flex-start',
                   padding: '4px 0'
                 }}
               >
                 {/* Left side: Salesforce Value */}
                 <div
                   style={{
-                    width: '35%',
+                    width: '40%',
+                    fontSize: '13px',
+                    color: 'var(--color-neutral-90)',
+                    fontFamily: 'var(--font-family-primary)',
+                    fontWeight: 500,
+                    paddingRight: '12px',
+                    paddingTop: '8px'
+                  }}
+                >
+                  {row.sfdcCode}
+                </div>
+
+                {/* Right side: Tackle Target (multi-select — a code can map to the
+                    same dimension on more than one listing) */}
+                <div style={{ width: '60%' }}>
+                  <ComboBox
+                    multiple
+                    options={SKU_GROUPED_OPTIONS}
+                    values={currentVals}
+                    onValuesChange={(vals) => setSkuMappings({ ...skuMappings, [row.sfdcCode]: vals })}
+                    placeholder="Choose dimensions"
+                    className="w-full"
+                  />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        )}
+        </div>
+
+        {/* Footer */}
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'flex-end',
+            gap: '8px',
+            padding: '16px 24px',
+            borderTop: '1px solid var(--color-neutral-20)'
+          }}
+        >
+          <Button variant="secondary" size="small" onClick={() => setSkuMapOpen(false)}>
+            Cancel
+          </Button>
+          <Button variant="primary" size="small" onClick={applySkuMap}>
+            Apply
+          </Button>
+        </div>
+      </div>
+    </>
+  );
+
+  const feePricingModal = feePricingOpen && (
+    <>
+      <div
+        onClick={() => setFeePricingOpen(false)}
+        style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,43,65,0.4)', zIndex: 100 }}
+      />
+      <div
+        role="dialog"
+        aria-label="Set default pricing"
+        style={{
+          position: 'fixed',
+          top: '50%',
+          left: '50%',
+          transform: 'translate(-50%, -50%)',
+          width: 'min(620px, 94vw)',
+          maxHeight: '90vh',
+          overflowY: 'auto',
+          zIndex: 101,
+          backgroundColor: 'var(--color-neutral-0)',
+          borderRadius: 'var(--border-radius-base)',
+          boxShadow: 'var(--elevation-400)',
+          display: 'flex',
+          flexDirection: 'column'
+        }}
+      >
+        {/* Header */}
+        <div style={{ padding: '20px 24px 0 24px' }}>
+          <h2
+            style={{
+              margin: '0 0 4px 0',
+              fontSize: '18px',
+              fontWeight: 700,
+              color: 'var(--color-neutral-100)',
+              fontFamily: 'var(--font-family-primary)'
+            }}
+          >
+            Set default pricing
+          </h2>
+          <p
+            style={{
+              margin: 0,
+              fontSize: '13px',
+              color: 'var(--color-neutral-70)',
+              fontFamily: 'var(--font-family-primary)'
+            }}
+          >
+            Set a fallback fee amount for each mapped usage dimension
+          </p>
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', padding: '16px 24px' }}>
+          {/* Field Header Block */}
+          <div style={{ display: 'flex', gap: '24px' }}>
+            <div style={{ flex: 1 }}>
+              <label
+                style={{
+                  display: 'block',
+                  fontSize: '12px',
+                  fontWeight: 600,
+                  color: 'var(--color-neutral-70)',
+                  marginBottom: '6px',
+                  fontFamily: 'var(--font-family-primary)'
+                }}
+              >
+                AWS Marketplace field
+              </label>
+              <div
+                style={{
+                  padding: '8px 12px',
+                  backgroundColor: 'var(--color-neutral-10)',
+                  border: '1px solid var(--color-neutral-30)',
+                  borderRadius: 'var(--border-radius-base)',
+                  fontSize: '14px',
+                  color: 'var(--color-neutral-80)',
+                  fontFamily: 'var(--font-family-primary)',
+                  fontWeight: 600
+                }}
+              >
+                Usage dimension
+              </div>
+            </div>
+          </div>
+
+          {/* Section Header Shaded Bar */}
+          <div
+            style={{
+              display: 'flex',
+              backgroundColor: 'var(--color-neutral-10)',
+              borderTop: '1px solid var(--color-neutral-30)',
+              borderBottom: '1px solid var(--color-neutral-30)',
+              padding: '10px 16px',
+              margin: '0 -24px'
+            }}
+          >
+            <div
+              style={{
+                width: '60%',
+                fontSize: '13px',
+                fontWeight: 700,
+                color: 'var(--color-neutral-90)',
+                fontFamily: 'var(--font-family-primary)'
+              }}
+            >
+              AWS Marketplace values
+            </div>
+            <div
+              style={{
+                width: '40%',
+                fontSize: '13px',
+                fontWeight: 700,
+                color: 'var(--color-neutral-90)',
+                fontFamily: 'var(--font-family-primary)'
+              }}
+            >
+              Default value
+            </div>
+          </div>
+
+          {/* Pricing Rows — only the AWS SKUs that have been mapped */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            {mappedSkus.map((sku) => (
+              <div
+                key={sku}
+                style={{ display: 'flex', alignItems: 'center', padding: '4px 0' }}
+              >
+                <div
+                  style={{
+                    width: '60%',
                     fontSize: '13px',
                     color: 'var(--color-neutral-90)',
                     fontFamily: 'var(--font-family-primary)',
@@ -1055,34 +1389,39 @@ export function HomePageV3() {
                     paddingRight: '12px'
                   }}
                 >
-                  {row.sfdcCode}
+                  {skuTargetLabel(sku)}
                 </div>
-
-                {/* Middle side: Tackle Target */}
-                <div style={{ width: '45%', paddingRight: '16px' }}>
-                  <ComboBox
-                    options={TACKLE_COMPOSITE_TARGETS.map((t) => ({ value: t, label: t }))}
-                    value={currentVal}
-                    onChange={(val) => setSkuMappings({ ...skuMappings, [row.sfdcCode]: val })}
-                    placeholder="Choose a composite SKU target"
-                    className="w-full"
-                  />
-                </div>
-
-                {/* Right side: Static default rate */}
-                <div style={{ width: '20%' }}>
+                <div style={{ width: '40%' }}>
                   <TextField
-                    value={currentRate}
-                    onChange={(e) => setSkuDefaults({ ...skuDefaults, [row.sfdcCode]: e.target.value })}
-                    placeholder="e.g. $0.00"
+                    value={feeDefaults[sku] || ''}
+                    onChange={(e) => setFeeDefaults({ ...feeDefaults, [sku]: e.target.value })}
+                    placeholder="Enter a value"
                   />
                 </div>
               </div>
-            );
-          })}
+            ))}
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'flex-end',
+            gap: '8px',
+            padding: '16px 24px',
+            borderTop: '1px solid var(--color-neutral-20)'
+          }}
+        >
+          <Button variant="secondary" size="small" onClick={() => setFeePricingOpen(false)}>
+            Cancel
+          </Button>
+          <Button variant="primary" size="small" onClick={applyFeePricing}>
+            Apply
+          </Button>
         </div>
       </div>
-    </Modal>
+    </>
   );
 
   /* ------------------------------ Render ------------------------------- */
@@ -1330,6 +1669,7 @@ export function HomePageV3() {
 
       {copyDrawer}
       {skuMapModal}
+      {feePricingModal}
     </div>
   );
 }

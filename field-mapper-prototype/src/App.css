@@ -37,3 +37,11 @@ body {
   font-weight: 400;
   opacity: 1;
 }
+
+/* The ComboBox dropdown portals to <body> via base-ui's positioner (position:fixed).
+   Lift it (z-index ONLY — never override position, which breaks floating-ui) so it
+   renders above custom overlays like the SKU-mapping modal (z-index 101). */
+div:has(> [class*="_dropdown_"]),
+[class*="_dropdown_"] {
+  z-index: 99999 !important;
+}
