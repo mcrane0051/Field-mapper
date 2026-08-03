@@ -210,6 +210,20 @@ const DEFAULT_SKU_ROWS = [
   { sfdcCode: 'PROD-ENT-ADD', defaultTarget: 'Hooli Enterprise > add_charge', defaultRate: '$0.00' }
 ];
 
+// Public pricing for each listing's usage dimensions. Formatted as custom unique
+// rates up to 8 decimal points, keeping each under 10 cents USD as requested.
+const PUBLIC_LISTING_PRICES: Record<string, string> = {
+  'Hooli Basic > Overage': '$0.08000000',
+  'Hooli Enterprise > Add_charge': '$0.01500000',
+  'Hooli Enterprise > Add_units': '$0.00500000',
+  'Hooli Enterprise > Add_users': '$0.04500000',
+  'Hooli Enterprise > Overage': '$0.09000000',
+  'Hooli Premium > Add_charge': '$0.02000000',
+  'Hooli Premium > Add_units': '$0.00750000',
+  'Hooli Premium > Overage': '$0.07000000',
+  'Hooli Standard API > Add_units': '$0.00350000'
+};
+
 // Formats a stored "Listing > SKU" value as "SKU (Listing)" for display in both
 // the mapping dropdown/chips and the default-pricing table, so nothing is ambiguous.
 const skuTargetLabel = (value: string) => {
@@ -305,7 +319,8 @@ export function HomePageV3() {
   const [skuMappings, setSkuMappings] = useState<Record<string, string[]>>({});
   const [feePricingOpen, setFeePricingOpen] = useState(false);
   // Default pricing is keyed by the mapped AWS SKU (e.g. "Hooli Premium > Overage").
-  const [feeDefaults, setFeeDefaults] = useState<Record<string, string>>({});
+  // Initialized with the unique listing public pricing by default.
+  const [feeDefaults, setFeeDefaults] = useState<Record<string, string>>({ ...PUBLIC_LISTING_PRICES });
 
   // Unique AWS SKUs that have actually been mapped in the "Map SKU values" modal.
   const mappedSkus = Array.from(
@@ -609,7 +624,7 @@ export function HomePageV3() {
                 // that were derived from the OLD field's values, so reset them.
                 const hadMappings = Object.values(skuMappings).some((a) => a && a.length);
                 setSkuMappings({});
-                setFeeDefaults({});
+                setFeeDefaults({ ...PUBLIC_LISTING_PRICES });
                 // Guided hand-off: open to (re)map values against the new field —
                 // on first selection, or when a change wiped out existing mappings.
                 // Slight delay so the selection registers visually before the modal.
@@ -1297,14 +1312,15 @@ export function HomePageV3() {
               margin: 0,
               fontSize: '13px',
               color: 'var(--color-neutral-70)',
-              fontFamily: 'var(--font-family-primary)'
+              fontFamily: 'var(--font-family-primary)',
+              lineHeight: '1.4'
             }}
           >
             Set a fallback fee amount for each mapped usage dimension
           </p>
         </div>
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', padding: '16px 24px' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', padding: '16px 24px 24px 24px' }}>
           {/* Field Header Block */}
           <div style={{ display: 'flex', gap: '24px' }}>
             <div style={{ flex: 1 }}>
@@ -1335,6 +1351,16 @@ export function HomePageV3() {
                 Usage dimension
               </div>
             </div>
+          </div>
+
+          {/* Info Banner: 24px gap above and below, 14px text size */}
+          <div style={{ marginTop: '24px', marginBottom: '24px', fontSize: '14px' }}>
+            <Banner
+              className="default-pricing-banner"
+              variant="info"
+              borderPosition="top"
+              title="Pricing defaults to the public list price. Any change overrides it."
+            />
           </div>
 
           {/* Section Header Shaded Bar */}
@@ -1393,7 +1419,7 @@ export function HomePageV3() {
                 </div>
                 <div style={{ width: '40%' }}>
                   <TextField
-                    value={feeDefaults[sku] || ''}
+                    value={feeDefaults[sku] !== undefined ? feeDefaults[sku] : (PUBLIC_LISTING_PRICES[sku] || '')}
                     onChange={(e) => setFeeDefaults({ ...feeDefaults, [sku]: e.target.value })}
                     placeholder="Enter a value"
                   />

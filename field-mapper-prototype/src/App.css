@@ -17,9 +17,13 @@ body {
 
 /* The token scale has no 14px step, so the banner type is set explicitly. */
 .field-mapper-banner .tackle-banner__title,
-.field-mapper-banner .tackle-banner__body {
-  font-size: 14px;
-  line-height: var(--line-height-small);
+.field-mapper-banner .tackle-banner__body,
+.default-pricing-banner .tackle-banner__title,
+.default-pricing-banner .tackle-banner__body,
+.default-pricing-banner h3,
+.default-pricing-banner div {
+  font-size: 14px !important;
+  line-height: var(--line-height-small) !important;
 }
 
 /* Default-value column: ComboBox roots are already 100% wide, but TextField
