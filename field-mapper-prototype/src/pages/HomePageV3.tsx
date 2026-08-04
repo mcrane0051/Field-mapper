@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import {
   Button,
@@ -15,7 +15,12 @@ import {
   OffersIcon,
   ListingsIcon,
   HelpIcon,
-  WarningIcon
+  WarningIcon,
+  SelectionTag,
+  ArrowRightIcon,
+  CloseIcon,
+  ExpandIcon,
+  CollapseIcon
 } from '@tackle-io/design-system';
 import {
   LISTINGS_BY_ACCOUNT,
@@ -224,31 +229,204 @@ const PUBLIC_LISTING_PRICES: Record<string, string> = {
   'Hooli Standard API > Add_units': '$0.00350000'
 };
 
-// Formats a stored "Listing > SKU" value as "SKU (Listing)" for display in both
-// the mapping dropdown/chips and the default-pricing table, so nothing is ambiguous.
+// Formats a stored "Listing > SKU" value as "SKU (Listing)" for display in the
+// default-pricing table.
 const skuTargetLabel = (value: string) => {
   const [listing, sku] = value.split(' > ');
   return sku ? `${sku} (${listing})` : value;
 };
 
-// Each option is a Listing+SKU pair. The value keeps the "Listing > SKU" shape
-// (used by fee-pricing + mappedSkus), and the LABEL carries both the SKU and the
-// listing so a selected chip is never ambiguous. Sorted alphabetically by SKU
-// name first, then by listing name.
-const SKU_GROUPED_OPTIONS = [
-  { value: 'Hooli Enterprise > Add_charge', label: skuTargetLabel('Hooli Enterprise > Add_charge'), disabled: false },
-  { value: 'Hooli Premium > Add_charge', label: skuTargetLabel('Hooli Premium > Add_charge'), disabled: false },
+// Chip label for the mapping multi-select: "[Listing]: [Dimension]" (mirrors the
+// filter-chip pattern the UX Director referenced).
+const skuChipLabel = (value: string) => {
+  const [listing, dim] = value.split(' > ');
+  return dim ? `${listing}: ${dim}` : value;
+};
 
-  { value: 'Hooli Enterprise > Add_units', label: skuTargetLabel('Hooli Enterprise > Add_units'), disabled: false },
-  { value: 'Hooli Premium > Add_units', label: skuTargetLabel('Hooli Premium > Add_units'), disabled: false },
-  { value: 'Hooli Standard API > Add_units', label: skuTargetLabel('Hooli Standard API > Add_units'), disabled: false },
-
-  { value: 'Hooli Enterprise > Add_users', label: skuTargetLabel('Hooli Enterprise > Add_users'), disabled: false },
-
-  { value: 'Hooli Basic > Overage', label: skuTargetLabel('Hooli Basic > Overage'), disabled: false },
-  { value: 'Hooli Enterprise > Overage', label: skuTargetLabel('Hooli Enterprise > Overage'), disabled: false },
-  { value: 'Hooli Premium > Overage', label: skuTargetLabel('Hooli Premium > Overage'), disabled: false }
+// Usage dimensions grouped by listing (parent) -> dimensions (children). The
+// stored value keeps the "Listing > SKU" shape (used by fee-pricing + mappedSkus).
+const SKU_GROUPS: Array<{ listing: string; dims: string[] }> = [
+  { listing: 'Hooli Premium', dims: ['Overage', 'Add_charge', 'Add_units'] },
+  { listing: 'Hooli Basic', dims: ['Overage'] },
+  { listing: 'Hooli Standard API', dims: ['Add_units'] },
+  { listing: 'Hooli Enterprise', dims: ['Overage', 'Add_charge', 'Add_units', 'Add_users'] }
 ];
+
+// Custom multi-select for mapping a Salesforce value to usage dimensions.
+// The stock ComboBox renders the same string for the dropdown row and the chip,
+// so we build this to get a grouped (listing -> dimension) menu with clean child
+// labels AND chips formatted as "[Listing]: [Dimension]" via SelectionTag.
+function SkuMultiSelect({
+  values,
+  onChange,
+  placeholder
+}: {
+  values: string[];
+  onChange: (values: string[]) => void;
+  placeholder: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDocClick = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', onDocClick);
+    return () => document.removeEventListener('mousedown', onDocClick);
+  }, [open]);
+
+  const toggle = (val: string) => {
+    onChange(values.includes(val) ? values.filter((v) => v !== val) : [...values, val]);
+  };
+
+  return (
+    <div ref={ref} style={{ position: 'relative', width: '100%' }}>
+      {/* Control */}
+      <div
+        onClick={() => setOpen((o) => !o)}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '6px',
+          flexWrap: 'wrap',
+          minHeight: '38px',
+          padding: '5px 8px',
+          border: `1px solid ${open ? 'var(--color-blue-70)' : 'var(--color-neutral-40)'}`,
+          boxShadow: open ? '0 0 0 1px var(--color-blue-70)' : 'none',
+          borderRadius: 'var(--border-radius-base)',
+          backgroundColor: 'var(--color-neutral-0)',
+          cursor: 'pointer',
+          fontFamily: 'var(--font-family-primary)'
+        }}
+      >
+        {values.length === 0 && (
+          <span style={{ color: 'var(--color-neutral-70)', fontSize: '14px', padding: '0 2px' }}>
+            {placeholder}
+          </span>
+        )}
+        {values.map((v) => (
+          <span
+            key={v}
+            style={{ display: 'inline-flex' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <SelectionTag onRemove={() => toggle(v)}>
+              {skuChipLabel(v)}
+            </SelectionTag>
+          </span>
+        ))}
+        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '4px' }}>
+          {values.length > 0 && (
+            <button
+              type="button"
+              aria-label="Clear all"
+              onClick={(e) => {
+                e.stopPropagation();
+                onChange([]);
+              }}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                width: '16px',
+                height: '16px',
+                background: 'none',
+                border: 'none',
+                padding: 0,
+                cursor: 'pointer',
+                color: 'var(--color-neutral-90)'
+              }}
+            >
+              <CloseIcon size="small" />
+            </button>
+          )}
+          <span
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: '24px',
+              height: '24px',
+              color: 'var(--color-neutral-90)'
+            }}
+          >
+            {open ? <CollapseIcon /> : <ExpandIcon />}
+          </span>
+        </div>
+      </div>
+
+      {/* Dropdown */}
+      {open && (
+        <div
+          style={{
+            position: 'absolute',
+            top: 'calc(100% + 4px)',
+            left: 0,
+            right: 0,
+            zIndex: 102,
+            maxHeight: '280px',
+            overflowY: 'auto',
+            backgroundColor: 'var(--color-neutral-0)',
+            border: '1px solid var(--color-neutral-30)',
+            borderRadius: 'var(--border-radius-base)',
+            boxShadow: 'var(--elevation-400)',
+            padding: '6px 0'
+          }}
+        >
+          {SKU_GROUPS.map((group) => (
+            <div key={group.listing}>
+              {/* Parent (listing) header — non-selectable */}
+              <div
+                style={{
+                  padding: '8px 16px 4px 16px',
+                  fontSize: '14px',
+                  fontWeight: 400,
+                  color: 'var(--color-neutral-60)',
+                  fontFamily: 'var(--font-family-primary)'
+                }}
+              >
+                {group.listing}
+              </div>
+              {/* Child dimensions — selectable */}
+              {group.dims.map((dim) => {
+                const val = `${group.listing} > ${dim}`;
+                const selected = values.includes(val);
+                return (
+                  <div
+                    key={val}
+                    onClick={() => toggle(val)}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: '8px 16px 8px 28px',
+                      fontSize: '14px',
+                      color: 'var(--color-neutral-100)',
+                      fontFamily: 'var(--font-family-primary)',
+                      cursor: 'pointer',
+                      backgroundColor: selected ? 'var(--color-blue-10)' : 'transparent'
+                    }}
+                    onMouseEnter={(e) => {
+                      if (!selected) e.currentTarget.style.backgroundColor = 'var(--color-neutral-10)';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.backgroundColor = selected ? 'var(--color-blue-10)' : 'transparent';
+                    }}
+                  >
+                    <span>{dim}</span>
+                    {selected && <span style={{ color: 'var(--color-blue-70)', fontWeight: 700 }}>✓</span>}
+                  </div>
+                );
+              })}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 const TACKLE_OBJECT_TABS = [
   { id: 'cosell', label: 'Co-Sell', icon: <CoSellIcon size="small" /> },
@@ -323,17 +501,29 @@ export function HomePageV3() {
   const [feeDefaults, setFeeDefaults] = useState<Record<string, string>>({ ...PUBLIC_LISTING_PRICES });
 
   // Unique AWS SKUs that have actually been mapped in the "Map SKU values" modal.
+  // Sorted by dimension name (alpha); ties (same dimension on >1 listing) break by
+  // listing name (alpha) — value shape is "Listing > Dimension".
   const mappedSkus = Array.from(
     new Set(
       Object.values(skuMappings)
         .flat()
         .filter(Boolean)
     )
-  );
+  ).sort((a, b) => {
+    const [aListing, aDim] = a.split(' > ');
+    const [bListing, bDim] = b.split(' > ');
+    return aDim.localeCompare(bDim) || aListing.localeCompare(bListing);
+  });
 
   const mappedSkuCodes = DEFAULT_SKU_ROWS.filter(
     (r) => (skuMappings[r.sfdcCode] || []).length > 0
   ).length;
+
+  // True when at least one mapped dimension's price differs from its public list
+  // price — drives whether the "Reset" button in the pricing modal is enabled.
+  const hasFeeOverride = mappedSkus.some(
+    (sku) => (feeDefaults[sku] ?? PUBLIC_LISTING_PRICES[sku] ?? '') !== (PUBLIC_LISTING_PRICES[sku] ?? '')
+  );
 
   const isPartner = tab === 'partner';
   const mappings = isPartner ? partnerMappings : directMappings;
@@ -1073,8 +1263,8 @@ export function HomePageV3() {
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', padding: '16px 24px' }}>
-        {/* Field Header Block */}
-        <div style={{ display: 'flex', gap: '24px' }}>
+        {/* Field Header Block — arrow between the two boxes signals the mapping direction */}
+        <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-end' }}>
           <div style={{ flex: 1 }}>
             <label
               style={{
@@ -1102,6 +1292,18 @@ export function HomePageV3() {
             >
               {usageSourceLeaf || 'Not selected'}
             </div>
+          </div>
+          <div
+            style={{
+              flexShrink: 0,
+              display: 'flex',
+              alignItems: 'center',
+              height: '38px',
+              color: 'var(--color-neutral-90)'
+            }}
+            aria-hidden="true"
+          >
+            <ArrowRightIcon size="small" />
           </div>
           <div style={{ flex: 1 }}>
             <label
@@ -1232,13 +1434,10 @@ export function HomePageV3() {
                 {/* Right side: Tackle Target (multi-select — a code can map to the
                     same dimension on more than one listing) */}
                 <div style={{ width: '60%' }}>
-                  <ComboBox
-                    multiple
-                    options={SKU_GROUPED_OPTIONS}
+                  <SkuMultiSelect
                     values={currentVals}
-                    onValuesChange={(vals) => setSkuMappings({ ...skuMappings, [row.sfdcCode]: vals })}
+                    onChange={(vals) => setSkuMappings({ ...skuMappings, [row.sfdcCode]: vals })}
                     placeholder="Choose dimensions"
-                    className="w-full"
                   />
                 </div>
               </div>
@@ -1248,14 +1447,20 @@ export function HomePageV3() {
         )}
         </div>
 
-        {/* Footer */}
+        {/* Footer — sticky to the bottom of the modal while the body scrolls */}
         <div
           style={{
             display: 'flex',
             justifyContent: 'flex-end',
             gap: '8px',
             padding: '16px 24px',
-            borderTop: '1px solid var(--color-neutral-20)'
+            borderTop: '1px solid var(--color-neutral-20)',
+            position: 'sticky',
+            bottom: 0,
+            backgroundColor: 'var(--color-neutral-0)',
+            borderBottomLeftRadius: 'var(--border-radius-base)',
+            borderBottomRightRadius: 'var(--border-radius-base)',
+            zIndex: 1
           }}
         >
           <Button variant="secondary" size="small" onClick={() => setSkuMapOpen(false)}>
@@ -1429,18 +1634,32 @@ export function HomePageV3() {
           </div>
         </div>
 
-        {/* Footer */}
+        {/* Footer — sticky to the bottom of the modal while the body scrolls */}
         <div
           style={{
             display: 'flex',
             justifyContent: 'flex-end',
             gap: '8px',
             padding: '16px 24px',
-            borderTop: '1px solid var(--color-neutral-20)'
+            borderTop: '1px solid var(--color-neutral-20)',
+            position: 'sticky',
+            bottom: 0,
+            backgroundColor: 'var(--color-neutral-0)',
+            borderBottomLeftRadius: 'var(--border-radius-base)',
+            borderBottomRightRadius: 'var(--border-radius-base)',
+            zIndex: 1
           }}
         >
           <Button variant="secondary" size="small" onClick={() => setFeePricingOpen(false)}>
             Cancel
+          </Button>
+          <Button
+            variant="secondary"
+            size="small"
+            disabled={!hasFeeOverride}
+            onClick={() => setFeeDefaults({ ...PUBLIC_LISTING_PRICES })}
+          >
+            Reset
           </Button>
           <Button variant="primary" size="small" onClick={applyFeePricing}>
             Apply
