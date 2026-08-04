@@ -781,24 +781,6 @@ export function HomePageV3() {
         {structRow('contract_price_per', 'Price per unit', 'Number', 'none', 'Enter a value', 'contract_dimension_obj')}
 
         {subHeader(
-          'Payment schedule',
-          'Lets buyers pay in installments throughout the course of their contract. Select the Salesforce object that stores it, then map the fields below.'
-        )}
-        {parentObjectRow('payment_schedule_obj', 'Salesforce object for payment schedule', SF_LINE_ITEM_OBJECT_OPTIONS)}
-        {structRow('invoice_date', 'Invoice date', 'Text', 'none', 'Enter a value', 'payment_schedule_obj')}
-        {structRow('payment_amt', 'Payment amount', 'Text', 'none', 'Enter a value', 'payment_schedule_obj')}
-
-        {subHeader('Usage only', 'For contracts that will bill buyers on their usage only.')}
-        {structRow('usage_end_date', 'Usage end date', 'Text', 'none')}
-
-        {!isPartner && (
-          <>
-            {subHeader('Amendments', 'For contracts that are being amended.')}
-            {structRow('new_service_end_date', 'New service end date', 'Text', 'none')}
-          </>
-        )}
-
-        {subHeader(
           'Usage dimensions',
           'Each listing defines its own usage dimensions. Map where usage pricing lives in Salesforce once — Tackle matches each line item to the right dimension by its name, so this scales to any number of dimensions.'
         )}
@@ -880,6 +862,24 @@ export function HomePageV3() {
             </div>
           </div>
         </Row>
+
+        {subHeader(
+          'Payment schedule',
+          'Lets buyers pay in installments throughout the course of their contract. Select the Salesforce object that stores it, then map the fields below.'
+        )}
+        {parentObjectRow('payment_schedule_obj', 'Salesforce object for payment schedule', SF_LINE_ITEM_OBJECT_OPTIONS)}
+        {structRow('invoice_date', 'Invoice date', 'Text', 'none', 'Enter a value', 'payment_schedule_obj')}
+        {structRow('payment_amt', 'Payment amount', 'Text', 'none', 'Enter a value', 'payment_schedule_obj')}
+
+        {subHeader('Usage only', 'For contracts that will bill buyers on their usage only.')}
+        {structRow('usage_end_date', 'Usage end date', 'Text', 'none')}
+
+        {!isPartner && (
+          <>
+            {subHeader('Amendments', 'For contracts that are being amended.')}
+            {structRow('new_service_end_date', 'New service end date', 'Text', 'none')}
+          </>
+        )}
       </Section>
 
       <Section title="End user license agreement fields">
